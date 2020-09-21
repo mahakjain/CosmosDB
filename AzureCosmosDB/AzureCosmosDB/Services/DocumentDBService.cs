@@ -1,11 +1,11 @@
-﻿using AzureCosmosDB.Models;
-using Microsoft.Azure.Documents;
-using Microsoft.Azure.Documents.Client;
-using Microsoft.Azure.Documents.Linq;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AzureCosmosDB.Models;
+using Microsoft.Azure.Documents;
+using Microsoft.Azure.Documents.Client;
+using Microsoft.Azure.Documents.Linq;
 
 namespace AzureCosmosDB.Services
 {
@@ -16,6 +16,26 @@ namespace AzureCosmosDB.Services
         private static readonly FeedOptions DefaultFeedOptions = new FeedOptions
         {
             EnableCrossPartitionQuery = true
+        };
+
+        private static readonly Dictionary<string, string> partitionKeyPairs = new Dictionary<string, string>()
+        {
+            ["association"] = "documentType",
+            ["brokerage"] = "documentType",
+            ["contact"] = "userIdOfOwner",
+            ["document"] = "userIdOfOwner",
+            ["invite"] = "documentType",
+            ["leadrequest"] = "documentType",
+            ["listings"] = "userId",
+            ["market"] = "documentType",
+            ["messages"] = "owner/userId",
+            ["communication"] = "owner/userId",
+            ["notification"] = "userId",
+            ["offer"] = "documentType",
+            ["portfolio"] = "documentType",
+            ["regionaldirector"] = "documentType",
+            ["searchhistory"] = "owner/userId",
+            ["useraction"] = "actionType"
         };
 
         public void SetDatabase(string endPoint, string authorizationKey)
@@ -61,10 +81,10 @@ namespace AzureCosmosDB.Services
 
         public async Task MigrateCollection(string containerId)
         {
-            var collectionUri = UriFactory.CreateDocumentCollectionUri(_databaseId, containerId);
+            var oldCollectionUri = UriFactory.CreateDocumentCollectionUri(_databaseId, containerId);
 
             var queryDefinition = new SqlQuerySpec($"SELECT * FROM d");
-            var queryIterator = _client.CreateDocumentQuery<int>(collectionUri, queryDefinition, DefaultFeedOptions).AsDocumentQuery();
+            var queryIterator = _client.CreateDocumentQuery<int>(oldCollectionUri, queryDefinition, DefaultFeedOptions).AsDocumentQuery();
             List<dynamic> results = new List<dynamic>();
             while (queryIterator.HasMoreResults)
             {
@@ -72,44 +92,39 @@ namespace AzureCosmosDB.Services
 
                 results.AddRange(response.ToList());
             }
-            var databaseUri = UriFactory.CreateDatabaseUri(_databaseId);
-            var newContainer = await _client.CreateDocumentCollectionIfNotExistsAsync(databaseUri, new DocumentCollection()
-            {
-                Id = $"{containerId}_new",
-                PartitionKey = new PartitionKeyDefinition() { Paths = new System.Collections.ObjectModel.Collection<string>() { "/documentType" } }
-            });
 
-            foreach (var item in results)
+            partitionKeyPairs.TryGetValue(containerId, out string partitionKey);
+
+            if (!string.IsNullOrWhiteSpace(partitionKey))
             {
-                await _client.UpsertDocumentAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, newContainer.Resource.Id), item, null, true);
+                var databaseUri = UriFactory.CreateDatabaseUri(_databaseId);
+                var newContainer = await _client.CreateDocumentCollectionIfNotExistsAsync(databaseUri, new DocumentCollection()
+                {
+                    Id = $"{containerId}_new",
+                    PartitionKey = new PartitionKeyDefinition() { Paths = new System.Collections.ObjectModel.Collection<string>() { $"/{partitionKey}" } }
+                }).ConfigureAwait(false);
+
+                foreach (var item in results)
+                {
+                    await _client.UpsertDocumentAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, newContainer.Resource.Id), item, null, true).ConfigureAwait(false);
+                }
+
+                _ = await _client.DeleteDocumentCollectionAsync(oldCollectionUri).ConfigureAwait(false);
+
+                var partitionKeyContainer = await _client.CreateDocumentCollectionIfNotExistsAsync(databaseUri, new DocumentCollection()
+                {
+                    Id = $"{containerId}",
+                    PartitionKey = new PartitionKeyDefinition() { Paths = new System.Collections.ObjectModel.Collection<string>() { $"/{partitionKey}" } }
+                }).ConfigureAwait(false);
+
+                foreach (var item in results)
+                {
+                    await _client.UpsertDocumentAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, partitionKeyContainer.Resource.Id), item, null, true).ConfigureAwait(false);
+                }
+
+                //Delete temporary collection
+                _ = await _client.DeleteDocumentCollectionAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, newContainer.Resource.Id)).ConfigureAwait(false);
             }
         }
-
-
-        //public async Task MigrateCollection(string containerId)
-        //{
-        //    var collectionUri = UriFactory.CreateDocumentCollectionUri(_databaseId, containerId);
-
-        //    var queryDefinition = new SqlQuerySpec($"SELECT * FROM d");
-        //    var queryIterator = _client.CreateDocumentQuery<int>(collectionUri, queryDefinition, DefaultFeedOptions).AsDocumentQuery();
-        //    List<dynamic> results = new List<dynamic>();
-        //    while (queryIterator.HasMoreResults)
-        //    {
-        //        var response = await queryIterator.ExecuteNextAsync();
-
-        //        results.AddRange(response.ToList());
-        //    }
-        //    var databaseUri = UriFactory.CreateDatabaseUri(_databaseId);
-        //    var newContainer = await _client.CreateDocumentCollectionIfNotExistsAsync(databaseUri, new DocumentCollection()
-        //    {
-        //        Id = $"{containerId}_new",
-        //        PartitionKey = new PartitionKeyDefinition() { Paths = new System.Collections.ObjectModel.Collection<string>() { "/documentType" } }
-        //    });
-
-        //    foreach (var item in results)
-        //    {
-        //        await _client.UpsertDocumentAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, newContainer.Resource.Id), item, null, true);
-        //    }
-        //}
     }
 }
