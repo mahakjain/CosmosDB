@@ -81,7 +81,7 @@ namespace AzureCosmosDB.Services
                     Id = collection.Id,
                     PartitionKey = collection.PartitionKey.Paths.FirstOrDefault(),
                     RecordCount = recordCount,
-                    NeedMigration = partitionKeyPairs.ContainsKey(collection.Id) ? partitionKeyPairs[collection.Id] == $"/{collection.PartitionKey.Paths.FirstOrDefault()}" : true
+                    NeedMigration = !partitionKeyPairs.ContainsKey(collection.Id) || partitionKeyPairs[collection.Id] != $"/{collection.PartitionKey.Paths.FirstOrDefault()}"
                 });
             }
             return results.OrderBy(x => x.Id).ToList();
