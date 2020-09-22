@@ -22,7 +22,6 @@ namespace AzureCosmosDB
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddControllersWithViews();
-            services.AddSingleton<ICosmosDBService>(InitializeCosmosClientInstanceAsync(Configuration.GetSection("CosmosDb")));
             services.AddSingleton<IDocumentDBService>(new DocumentDBService());
         }
 
@@ -51,24 +50,5 @@ namespace AzureCosmosDB
                     pattern: "{controller=Home}/{action=Index}/{id?}");
             });
         }
-
-        // <InitializeCosmosClientInstanceAsync>        
-        /// <summary>
-        /// Creates a Cosmos DB database and a container with the specified partition key. 
-        /// </summary>
-        /// <returns></returns>
-        private static CosmosDBService InitializeCosmosClientInstanceAsync(IConfigurationSection configurationSection)
-        {
-            string databaseName = configurationSection.GetSection("DatabaseName").Value;
-            string account = configurationSection.GetSection("Account").Value;
-            string key = configurationSection.GetSection("Key").Value;
-            CosmosClientBuilder clientBuilder = new CosmosClientBuilder(account, key);
-            CosmosClient client = clientBuilder
-                                .WithConnectionModeDirect()
-                                .Build();
-            CosmosDBService cosmosDbService = new CosmosDBService(client, databaseName);
-            return cosmosDbService;
-        }
-        // </InitializeCosmosClientInstanceAsync>
     }
 }

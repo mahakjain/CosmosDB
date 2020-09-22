@@ -4,14 +4,14 @@ using System.Threading.Tasks;
 
 namespace AzureCosmosDB.Controllers
 {
-    public class DatabaseController : Controller
+    public class UserDatabaseController : Controller
     {
         private readonly IDocumentDBService _documentDBService;
         private readonly string endPoint = "";
         private readonly string authorizationKey = "";
-        private readonly string databaseName = "hgApplicationDocDb";
+        private readonly string databaseName = "hgUserDocDb";
 
-        public DatabaseController(IDocumentDBService documentDBService)
+        public UserDatabaseController(IDocumentDBService documentDBService)
         {
             _documentDBService = documentDBService;
             _documentDBService.SetDatabase(endPoint, authorizationKey);
@@ -27,7 +27,7 @@ namespace AzureCosmosDB.Controllers
         public async Task<IActionResult> MigrateToTemp(string id)
         {
             await _documentDBService.MigrateToTempCollection(id).ConfigureAwait(false);
-            
+
             return RedirectToAction("Index");
         }
 

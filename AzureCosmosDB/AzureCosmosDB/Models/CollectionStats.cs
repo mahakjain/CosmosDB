@@ -12,5 +12,7 @@ namespace AzureCosmosDB.Models
 
         [JsonProperty(PropertyName = "records")]
         public int RecordCount { get; set; }
+        [JsonProperty(PropertyName = "needMigration")]
+        public bool NeedMigration { get; set; }
     }
 }

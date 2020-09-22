@@ -8,6 +8,7 @@ namespace AzureCosmosDB.Services
     {
         void SetDatabase(string endPoint, string authorizationKey);
         Task<List<CollectionStats>> GetDatabaseCollections(string databaseId);
-        Task MigrateCollection(string containerId);
+        Task MigrateToTempCollection(string containerId);
+        Task DeleteAndMigrateCollection(string containerId);
     }
 }

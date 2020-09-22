@@ -35,7 +35,14 @@ namespace AzureCosmosDB.Services
             ["portfolio"] = "documentType",
             ["regionaldirector"] = "documentType",
             ["searchhistory"] = "owner/userId",
-            ["useraction"] = "actionType"
+            ["useraction"] = "actionType",
+            ["portfolio1_new"] = "documentType",
+            ["applicationUser"] = "documentType",
+            ["identityServerAudit"] = "id",
+            ["identityServerUser"] = "documentType",
+            ["identityServerUserGrant"] = "documentType",
+            ["messageaudit"] = "userIdOfOwner",
+            ["office365Action"] = "userId"
         };
 
         public void SetDatabase(string endPoint, string authorizationKey)
@@ -73,13 +80,14 @@ namespace AzureCosmosDB.Services
                 {
                     Id = collection.Id,
                     PartitionKey = collection.PartitionKey.Paths.FirstOrDefault(),
-                    RecordCount = recordCount
+                    RecordCount = recordCount,
+                    NeedMigration = partitionKeyPairs.ContainsKey(collection.Id) ? partitionKeyPairs[collection.Id] == $"/{collection.PartitionKey.Paths.FirstOrDefault()}" : true
                 });
             }
             return results.OrderBy(x => x.Id).ToList();
         }
 
-        public async Task MigrateCollection(string containerId)
+        public async Task MigrateToTempCollection(string containerId)
         {
             var oldCollectionUri = UriFactory.CreateDocumentCollectionUri(_databaseId, containerId);
 
@@ -104,12 +112,76 @@ namespace AzureCosmosDB.Services
                     PartitionKey = new PartitionKeyDefinition() { Paths = new System.Collections.ObjectModel.Collection<string>() { $"/{partitionKey}" } }
                 }).ConfigureAwait(false);
 
+                var storedProcedures = _client.CreateStoredProcedureQuery(oldCollectionUri, DefaultFeedOptions).ToList();
+
+                var triggers = _client.CreateTriggerQuery(oldCollectionUri, DefaultFeedOptions).ToList();
+
+                var userDefinedFunctions = _client.CreateUserDefinedFunctionQuery(oldCollectionUri, DefaultFeedOptions).ToList();
+
                 foreach (var item in results)
                 {
                     await _client.UpsertDocumentAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, newContainer.Resource.Id), item, null, true).ConfigureAwait(false);
                 }
 
-                _ = await _client.DeleteDocumentCollectionAsync(oldCollectionUri).ConfigureAwait(false);
+                foreach (var storedProcedure in storedProcedures)
+                {
+                    await _client.CreateStoredProcedureAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, newContainer.Resource.Id), new StoredProcedure()
+                    {
+                        Id = storedProcedure.Id,
+                        Body = storedProcedure.Body
+                    }).ConfigureAwait(false);
+                }
+
+                foreach (var trigger in triggers)
+                {
+                    await _client.CreateTriggerAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, newContainer.Resource.Id), new Trigger()
+                    {
+                        Id = trigger.Id,
+                        Body = trigger.Body
+                    }).ConfigureAwait(false);
+                }
+
+                foreach (var userDefinedFunction in userDefinedFunctions)
+                {
+                    await _client.CreateUserDefinedFunctionAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, newContainer.Resource.Id), new UserDefinedFunction()
+                    {
+                        Id = userDefinedFunction.Id,
+                        Body = userDefinedFunction.Body
+                    }).ConfigureAwait(false);
+                }
+            }
+        }
+
+        public async Task DeleteAndMigrateCollection(string containerId)
+        {
+            var newContainerId = $"{containerId}_new";
+
+            var newCollectionUri = UriFactory.CreateDocumentCollectionUri(_databaseId, newContainerId);
+
+            var queryDefinition = new SqlQuerySpec($"SELECT * FROM d");
+            var queryIterator = _client.CreateDocumentQuery<int>(newCollectionUri, queryDefinition, DefaultFeedOptions).AsDocumentQuery();
+            List<dynamic> results = new List<dynamic>();
+            while (queryIterator.HasMoreResults)
+            {
+                var response = await queryIterator.ExecuteNextAsync();
+
+                results.AddRange(response.ToList());
+            }
+
+            partitionKeyPairs.TryGetValue(containerId, out string partitionKey);
+
+            if (!string.IsNullOrWhiteSpace(partitionKey))
+            {
+                var databaseUri = UriFactory.CreateDatabaseUri(_databaseId);
+
+                //delete the old collection
+                _ = await _client.DeleteDocumentCollectionAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, containerId)).ConfigureAwait(false);
+
+                var storedProcedures = _client.CreateStoredProcedureQuery(newCollectionUri, DefaultFeedOptions).ToList();
+
+                var triggers = _client.CreateTriggerQuery(newCollectionUri, DefaultFeedOptions).ToList();
+
+                var userDefinedFunctions = _client.CreateUserDefinedFunctionQuery(newCollectionUri, DefaultFeedOptions).ToList();
 
                 var partitionKeyContainer = await _client.CreateDocumentCollectionIfNotExistsAsync(databaseUri, new DocumentCollection()
                 {
@@ -122,8 +194,35 @@ namespace AzureCosmosDB.Services
                     await _client.UpsertDocumentAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, partitionKeyContainer.Resource.Id), item, null, true).ConfigureAwait(false);
                 }
 
+                foreach (var storedProcedure in storedProcedures)
+                {
+                    await _client.CreateStoredProcedureAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, partitionKeyContainer.Resource.Id), new StoredProcedure()
+                    {
+                        Id = storedProcedure.Id,
+                        Body = storedProcedure.Body
+                    }).ConfigureAwait(false);
+                }
+
+                foreach (var trigger in triggers)
+                {
+                    await _client.CreateTriggerAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, partitionKeyContainer.Resource.Id), new Trigger()
+                    {
+                        Id = trigger.Id,
+                        Body = trigger.Body
+                    }).ConfigureAwait(false);
+                }
+
+                foreach (var userDefinedFunction in userDefinedFunctions)
+                {
+                    await _client.CreateUserDefinedFunctionAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, partitionKeyContainer.Resource.Id), new UserDefinedFunction()
+                    {
+                        Id = userDefinedFunction.Id,
+                        Body = userDefinedFunction.Body
+                    }).ConfigureAwait(false);
+                }
+
                 //Delete temporary collection
-                _ = await _client.DeleteDocumentCollectionAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, newContainer.Resource.Id)).ConfigureAwait(false);
+                _ = await _client.DeleteDocumentCollectionAsync(UriFactory.CreateDocumentCollectionUri(_databaseId, newContainerId)).ConfigureAwait(false);
             }
         }
     }
